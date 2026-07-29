@@ -761,7 +761,7 @@ async def button_click_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 
 def build_application():
     # ✅ FIX KUNCI: Membaca nama variabel 'TELEGRAM_BOT_TOKEN' dari Vercel Settings
-    BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    BOT_TOKEN = os.getenv("8059211421:AAGkK-g4Ca1FUKiOPStTMUX-7e4vBMR9Wzs", "")
     node = GlobalTarcoinNode()
 
     application = ApplicationBuilder().token(BOT_TOKEN).build()
