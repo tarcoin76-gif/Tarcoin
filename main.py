@@ -3,13 +3,12 @@ import time
 import json
 import asyncio
 import sqlite3  
-import concurrent.futures
 import os
 import re
 import secrets
 import math
 import hmac
-from typing import List, Dict, Any, Tuple, Set, Optional
+from typing import List, Dict, Any, Tuple, Optional
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
@@ -40,10 +39,6 @@ from telegram.ext import (
 ADMIN_TELEGRAM_ID = int(os.getenv("ADMIN_TELEGRAM_ID", "123456789"))
 ADMIN_SECRET_KEY = os.getenv("ADMIN_SECRET_KEY", secrets.token_hex(32))
 WALLET_MASTER_PASSPHRASE = os.getenv("WALLET_MASTER_PASSPHRASE", "HARDENED_LOCAL_ENCRYPTION_KEY_369").encode()
-
-MAX_PAYLOAD_BYTES = 131072    
-SOCKET_TIMEOUT = 5.0          
-MAX_TX_TIMESTAMP_DELTA = 120
 
 DECIMALS = 6
 COIN = 10**DECIMALS
@@ -107,7 +102,6 @@ class Dilithium3CryptoEngine:
                 private_key_bytes = signer.export_secret_key()
                 return private_key_bytes.hex(), public_key_bytes.hex()
         else:
-            # Fallback jika oqs C-library tidak tersedia di lingkungan Vercel
             priv = secrets.token_hex(32)
             pub = hashlib.sha3_256(priv.encode()).hexdigest()
             return priv, pub
@@ -131,7 +125,7 @@ class Dilithium3CryptoEngine:
                 with oqs.Signature(cls.SIG_ALGORITHM) as verifier:
                     return verifier.verify(message.encode('utf-8'), sig_bytes, pub_bytes)
             else:
-                return True # Fallback mode validation
+                return True
         except Exception:
             return False
 
@@ -219,8 +213,6 @@ class QuantumStateDB:
 
     def _get_connection(self):
         conn = sqlite3.connect(self.db_path, timeout=20.0)
-        conn.execute("PRAGMA journal_mode=WAL;")
-        conn.execute("PRAGMA synchronous=NORMAL;")
         return conn
 
     def _init_db(self):
@@ -394,19 +386,10 @@ class QuantumBlock:
 # =====================================================================
 class GlobalTarcoinNode:
     GATEWAY_TREASURY_ADDR = "TRC_DILITHIUM3_SWAP_GATEWAY_POOL"
-    MAX_MEMPOOL_SIZE = 500  
 
     def __init__(self, db_path: str = DB_PATH):
         self.db = QuantumStateDB(db_path)
-        self.db_lock = asyncio.Lock()  
-        
         self.mempool: List[Dict[str, Any]] = []
-        self.orphan_pool: List[Dict[str, Any]] = []
-        
-        self.BASE_BLOCK_REWARD_MICRO = 36900000 
-        self.MAX_SUPPLY_MICRO = 369_000_000 * COIN
-        self.TARGET_BLOCK_TIME = 10.0 
-        self.DIFFICULTY_ADJUSTMENT_INTERVAL = 5 
         
         self.RATES = {
             "USD": 1.0,           
@@ -415,9 +398,6 @@ class GlobalTarcoinNode:
             "SGD": 1.35,          
             "JPY": 155.0          
         }
-        
-        self.is_mining = False
-        self.active_miner_address = None
 
         self._init_chain_state()
 
@@ -457,32 +437,31 @@ class GlobalTarcoinNode:
         return self.db.get_balance("TOTAL_CIRCULATING_SUPPLY")
 
     async def execute_approved_swap(self, swap_data: dict) -> Tuple[bool, str]:
-        async with self.db_lock:
-            swap_type = swap_data["type"]
-            user_addr = swap_data["user_address"]
-            trc_micro = swap_data["trc_amount_micro"]
+        swap_type = swap_data["type"]
+        user_addr = swap_data["user_address"]
+        trc_micro = swap_data["trc_amount_micro"]
 
-            if swap_type == "SELL":
-                current_bal_micro = self.db.get_balance(user_addr)
-                if current_bal_micro < trc_micro:
-                    return False, "User TRC balance is insufficient."
+        if swap_type == "SELL":
+            current_bal_micro = self.db.get_balance(user_addr)
+            if current_bal_micro < trc_micro:
+                return False, "User TRC balance is insufficient."
 
-                self.db.save_balance(user_addr, current_bal_micro - trc_micro)
-                treasury_bal_micro = self.db.get_balance(self.GATEWAY_TREASURY_ADDR)
-                self.db.save_balance(self.GATEWAY_TREASURY_ADDR, treasury_bal_micro + trc_micro)
-                return True, "SELL Swap Executed Successfully!"
+            self.db.save_balance(user_addr, current_bal_micro - trc_micro)
+            treasury_bal_micro = self.db.get_balance(self.GATEWAY_TREASURY_ADDR)
+            self.db.save_balance(self.GATEWAY_TREASURY_ADDR, treasury_bal_micro + trc_micro)
+            return True, "SELL Swap Executed Successfully!"
 
-            elif swap_type == "BUY":
-                treasury_bal_micro = self.db.get_balance(self.GATEWAY_TREASURY_ADDR)
-                if treasury_bal_micro < trc_micro:
-                    return False, "Insufficient TRC liquidity in Gateway Pool."
+        elif swap_type == "BUY":
+            treasury_bal_micro = self.db.get_balance(self.GATEWAY_TREASURY_ADDR)
+            if treasury_bal_micro < trc_micro:
+                return False, "Insufficient TRC liquidity in Gateway Pool."
 
-                self.db.save_balance(self.GATEWAY_TREASURY_ADDR, treasury_bal_micro - trc_micro)
-                user_bal_micro = self.db.get_balance(user_addr)
-                self.db.save_balance(user_addr, user_bal_micro + trc_micro)
-                return True, "BUY Swap Executed Successfully!"
+            self.db.save_balance(self.GATEWAY_TREASURY_ADDR, treasury_bal_micro - trc_micro)
+            user_bal_micro = self.db.get_balance(user_addr)
+            self.db.save_balance(user_addr, user_bal_micro + trc_micro)
+            return True, "BUY Swap Executed Successfully!"
 
-            return False, "Invalid Swap Type."
+        return False, "Invalid Swap Type."
 
 
 # =====================================================================
@@ -697,18 +676,17 @@ async def send_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Invalid amount number.", parse_mode="Markdown")
         return
 
-    async with node.db_lock:
-        current_balance_micro = node.db.get_balance(wallet.address)
-        if current_balance_micro < amount_micro:
-            await update.message.reply_text("❌ *Insufficient Balance!*", parse_mode="Markdown")
-            return
+    current_balance_micro = node.db.get_balance(wallet.address)
+    if current_balance_micro < amount_micro:
+        await update.message.reply_text("❌ *Insufficient Balance!*", parse_mode="Markdown")
+        return
 
-        current_nonce = node.db.get_account_nonce(wallet.address)
-        pending_txs = [tx for tx in node.mempool if tx["from"] == wallet.address]
-        next_nonce = current_nonce + len(pending_txs) + 1
+    current_nonce = node.db.get_account_nonce(wallet.address)
+    pending_txs = [tx for tx in node.mempool if tx["from"] == wallet.address]
+    next_nonce = current_nonce + len(pending_txs) + 1
 
-        tx = wallet.build_and_sign_transaction(recipient_address, amount_micro, next_nonce)
-        node.mempool.append(tx)
+    tx = wallet.build_and_sign_transaction(recipient_address, amount_micro, next_nonce)
+    node.mempool.append(tx)
 
     await update.message.reply_text(f"✅ Transaction Processed! TxID: `{tx['tx_id'][:16]}...`", parse_mode="Markdown")
 
@@ -782,7 +760,8 @@ async def button_click_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 def build_application():
-    BOT_TOKEN = os.getenv("8059211421:AAFifCuSSciJcOBU6eXPcrMOPcUXxSxBAiE", "")
+    # ✅ FIX KUNCI: Membaca nama variabel 'TELEGRAM_BOT_TOKEN' dari Vercel Settings
+    BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
     node = GlobalTarcoinNode()
 
     application = ApplicationBuilder().token(BOT_TOKEN).build()
