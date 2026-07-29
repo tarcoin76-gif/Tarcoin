@@ -1,11 +1,16 @@
+import sys
+import os
+
+# Tambahkan root directory ke sys.path agar main.py bisa terbaca
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import json
 import asyncio
-import os
 from http.server import BaseHTTPRequestHandler
 from telegram import Update
 from main import build_application
 
-# Global instances (Reuse instance across serverless invocations)
+# Global instance
 app = build_application()
 initialized = False
 
@@ -31,7 +36,7 @@ class handler(BaseHTTPRequestHandler):
         try:
             update_data = json.loads(post_data.decode('utf-8'))
             update = Update.de_json(update_data, app.bot)
-            
+
             loop.run_until_complete(app.process_update(update))
 
             self.send_response(200)
