@@ -1129,7 +1129,7 @@ async def button_click_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 # =====================================================================
 def main():
     BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "YOUR_TELEGRAM_BOT_TOKEN_HERE")
-    P2P_PORT = int(os.getenv("P2P_PORT", "9001"))
+    P2P_PORT = int(os.getenv("P2P_PORT", "9002"))
 
     node = GlobalTarcoinNode("0.0.0.0", P2P_PORT, "./tarcoin_p2p_ledger.db")
 
