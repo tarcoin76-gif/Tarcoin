@@ -1,15 +1,12 @@
 {
   "version": 2,
   "builds": [
-    {
-      "src": "api/webhook.py",
-      "use": "@vercel/python"
-    }
+    { "src": "api/*.py", "use": "@vercel/python" }
   ],
   "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "api/webhook.py"
-    }
+    { "src": "/api/status", "dest": "/api/blockchain.py" },
+    { "src": "/api/wallet/create", "dest": "/api/blockchain.py" },
+    { "src": "/api/telegram-webhook", "dest": "/api/bot.py" },
+    { "src": "/(.*)", "dest": "/api/blockchain.py" }
   ]
 }
