@@ -9,7 +9,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = os.getenv("8059211421:AAGkK-g4Ca1FUKiOPStTMUX-7e4vBMR9Wzs")
+BOT_TOKEN = os.getenv("")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
