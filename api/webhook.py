@@ -8,7 +8,7 @@ from telegram.ext import Application
 
 app = FastAPI()
 
-BOT_TOKEN = os.getenv("8059211421:AAGkK-g4Ca1FUKiOPStTMUX-7e4vBMR9Wzs")
+BOT_TOKEN = os.getenv("")
 telegram_app = None
 
 async def get_telegram_app():
