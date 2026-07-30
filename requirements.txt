@@ -1,5 +1,4 @@
-python-telegram-bot==20.8
-cryptography
-pydantic
-requests
-oqs-py
+python-telegram-bot==20.7
+requests==2.31.0
+pqcrypto==0.1.2
+cryptography==42.0.5
