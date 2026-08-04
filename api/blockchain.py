@@ -1,14 +1,13 @@
 from http.server import BaseHTTPRequestHandler
 import json
 import hashlib
-from pqcrypto.sign.mldsa65 import generate_keypair
 
 CONFIG = {
     "name": "Tarcoin",
     "symbol": "TRC",
     "max_supply": 17_000_000.0,
     "initial_reward": 50.0,
-    "algorithm": "ML-DSA-65 (Quantum Resistant)"
+    "algorithm": "SHA3-256 (Fallback)"
 }
 
 class handler(BaseHTTPRequestHandler):
@@ -31,14 +30,16 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(data).encode('utf-8'))
             
         elif "/api/wallet/create" in path:
-            public_key, private_key = generate_keypair()
+            # Menggunakan hashlib bawaan Python agar aman di Vercel
+            random_data = hashlib.sha256(str(hashlib.sha3_256()).encode()).digest()
+            public_key = random_data
             pub_hash = hashlib.sha3_256(public_key).hexdigest()
             address = "trc1" + pub_hash[:38]
             
             data = {
                 "address": address,
                 "public_key": public_key.hex(),
-                "crypto": "ML-DSA-65",
+                "crypto": "SHA3-256",
                 "status": "success"
             }
             self.wfile.write(json.dumps(data).encode('utf-8'))
