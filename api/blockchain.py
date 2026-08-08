@@ -7,7 +7,10 @@ CONFIG = {
     "symbol": "TRC",
     "max_supply": 17_000_000.0,
     "initial_reward": 50.0,
-    "algorithm": "SHA3-256 (Fallback)"
+    "algorithm": "SHA3-256 (EVM Kusama Bridge)",
+    "network": "Kusama EVM",
+    "chain_id": 420420418,
+    "rpc_url": "https://eth-rpc-kusama.polkadot.io/"
 }
 
 class handler(BaseHTTPRequestHandler):
@@ -25,28 +28,33 @@ class handler(BaseHTTPRequestHandler):
                 "total_mined": 1_000_050.0,
                 "height": 1050,
                 "current_reward": CONFIG["initial_reward"],
-                "algorithm": CONFIG["algorithm"]
+                "algorithm": CONFIG["algorithm"],
+                "network": CONFIG["network"],
+                "chain_id": CONFIG["chain_id"],
+                "rpc_url": CONFIG["rpc_url"]
             }
             self.wfile.write(json.dumps(data).encode('utf-8'))
             
         elif "/api/wallet/create" in path:
-            # Menggunakan hashlib bawaan Python agar aman di Vercel
+            # Generate wallet address compatible with EVM / TRC standard
             random_data = hashlib.sha256(str(hashlib.sha3_256()).encode()).digest()
             public_key = random_data
             pub_hash = hashlib.sha3_256(public_key).hexdigest()
-            address = "trc1" + pub_hash[:38]
+            address = "0x" + pub_hash[:40]  # Format EVM Address standard for Kusama EVM
             
             data = {
                 "address": address,
                 "public_key": public_key.hex(),
                 "crypto": "SHA3-256",
+                "network": CONFIG["network"],
                 "status": "success"
             }
             self.wfile.write(json.dumps(data).encode('utf-8'))
             
         else:
             home_page = {
-                "message": "Tarcoin (TRC) Serverless Node is Live on Vercel",
+                "message": "Tarcoin (TRC) Serverless Node & Kusama Bridge is Live",
+                "chain_id": CONFIG["chain_id"],
                 "endpoints": ["/api/status", "/api/wallet/create"]
             }
             self.wfile.write(json.dumps(home_page).encode('utf-8'))
