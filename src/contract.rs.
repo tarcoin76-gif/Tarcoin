@@ -12,12 +12,12 @@ pub fn instantiate(
     info: MessageInfo,
     mut msg: cw20_base::msg::InstantiateMsg,
 ) -> StdResult<Response> {
-    // Menetapkan parameter spesifik untuk TARCOIN
+    // Set specific parameters for TARCOIN
     msg.name = "TARCOIN".to_string();
     msg.symbol = "TRC".to_string();
     msg.decimals = 18;
     
-    // Suplai 17.000.000 dengan 18 desimal (17.000.000 * 10^18)
+    // Supply of 17,000,000 with 18 decimals (17,000,000 * 10^18)
     let total_supply = Uint128::from(17_000_000u128)
         .checked_mul(Uint128::from(10u128).pow(18))
         .unwrap();
@@ -27,7 +27,7 @@ pub fn instantiate(
         amount: total_supply,
     }];
 
-    // Mematikan fungsi mint (None) agar suplai tetap langka selamanya
+    // Disable the mint function (None) to keep the supply permanently scarce
     msg.mint = None;
 
     cw20_instantiate(deps, env, info, msg)
@@ -51,4 +51,3 @@ pub fn query(
 ) -> StdResult<cosmwasm_std::Binary> {
     cw20_query(deps, env, msg)
 }
-
