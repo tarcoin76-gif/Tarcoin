@@ -81,24 +81,32 @@ def send_transaction(node_url: str, sender_pubkey: str, private_seed: str, recei
         print(f"Failed to submit transaction: {e}")
 
 
-def mine_block(node_url: str, miner_address: str):
+def start_continuous_mining(node_url: str, miner_address: str):
     if len(miner_address) != 128:
         print("Error: Invalid miner address format (must be 128 hex characters).")
         return
 
-    print(f"\n[Mining in progress...] Forging quantum-safe block for miner: {miner_address[:16]}...")
+    print(f"\n[Mining Started] Forging blocks continuously for miner: {miner_address[:16]}...")
+    print("Press Ctrl+C to stop mining at any time.\n")
+    
     try:
-        response = requests.get(f"{node_url}/mine", params={'miner': miner_address}, timeout=30)
-        if response.status_code == 200:
-            data = response.json()
-            print(f"\n[Success]: {data['message']}")
-            print(f"Block Index  : {data['index']}")
-            print(f"Block Hash   : {data['hash']}")
-            print(f"Transactions : {len(data['transactions'])} included")
-        else:
-            print(f"\n[Mining Failed]: {response.json().get('message')}")
-    except requests.exceptions.RequestException as e:
-        print(f"Connection failed during mining: {e}")
+        while True:
+            print(f"[{time.strftime('%H:%M:%S')}] Attempting to forge next block...")
+            try:
+                response = requests.get(f"{node_url}/mine", params={'miner': miner_address}, timeout=30)
+                if response.status_code == 200:
+                    data = response.json()
+                    print(f" -> [Success] Block #{data['index']} Forged! Hash: {data['hash'][:16]}... ({len(data['transactions'])} txs)")
+                else:
+                    print(f" -> [Mining Status]: {response.json().get('message')}")
+            except requests.exceptions.RequestException as e:
+                print(f" -> [Connection Error]: {e}")
+            
+            # Delaying between attempts to optimize resource consumption
+            time.sleep(5)
+            
+    except KeyboardInterrupt:
+        print("\n[Mining Stopped by User]")
 
 
 if __name__ == '__main__':
@@ -108,7 +116,7 @@ if __name__ == '__main__':
     print("1. Generate New Wallet")
     print("2. Check Balance")
     print("3. Send Transaction")
-    print("4. Mine Block (Claim Mining Reward)")
+    print("4. Start Continuous Mining (Press Ctrl+C to Stop)")
     
     choice = input("Select an option (1-4): ").strip()
     
@@ -133,7 +141,7 @@ if __name__ == '__main__':
         
     elif choice == '4':
         miner_addr = input("Enter your Miner Public Key (Address to receive reward): ").strip()
-        mine_block(node, miner_addr)
+        start_continuous_mining(node, miner_addr)
         
     else:
         print("Invalid option selected.")
