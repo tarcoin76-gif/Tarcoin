@@ -3,7 +3,6 @@ import hmac
 import secrets
 import time
 import requests
-import os
 import sys
 
 class QuantumResistantWallet:
@@ -29,6 +28,7 @@ class QuantumResistantWallet:
     def build_transaction(sender_pubkey: str, private_seed: str, receiver: str, amount: float, fee: float, nonce: int) -> dict:
         """Constructs and signs a transaction payload ready to be sent to the node."""
         timestamp = time.time()
+        # Calculate transaction hash matching the core logic
         tx_data = f"{sender_pubkey}{receiver}{amount}{fee}{timestamp}{nonce}"
         message = hashlib.sha3_512(tx_data.encode()).hexdigest()
         signature = QuantumResistantWallet.sign_message(private_seed, message)
@@ -44,14 +44,9 @@ class QuantumResistantWallet:
         }
 
 
-def get_node_url() -> str:
-    # Mengambil URL dari environment variable global, atau fallback ke localhost jika tidak diset
-    return os.getenv('TARCOIN_NODE_URL', 'http://127.0.0.1:5000')
-
-
 def check_balance(node_url: str, address: str):
     try:
-        response = requests.get(f"{node_url}/balance/{address}", timeout=5)
+        response = requests.get(f"{node_url}/balance/{address}")
         if response.status_code == 200:
             data = response.json()
             print(f"Address: {data['address']}")
@@ -59,10 +54,11 @@ def check_balance(node_url: str, address: str):
         else:
             print(f"Error: {response.json().get('message')}")
     except requests.exceptions.RequestException as e:
-        print(f"Connection to global node failed: {e}")
+        print(f"Connection failed: {e}")
 
 
 def send_transaction(node_url: str, sender_pubkey: str, private_seed: str, receiver: str, amount: float, fee: float):
+    # Using a random 32-bit integer nonce for simplicity (ensure uniqueness per sender)
     nonce = secrets.randbits(32)
     
     tx_payload = QuantumResistantWallet.build_transaction(
@@ -75,16 +71,16 @@ def send_transaction(node_url: str, sender_pubkey: str, private_seed: str, recei
     )
 
     try:
-        response = requests.post(f"{node_url}/transactions/new", json=tx_payload, timeout=5)
+        response = requests.post(f"{node_url}/transactions/new", json=tx_payload)
         print(response.json().get('message'))
     except requests.exceptions.RequestException as e:
-        print(f"Failed to submit transaction to global node: {e}")
+        print(f"Failed to submit transaction: {e}")
 
 
 if __name__ == '__main__':
-    node = get_node_url()
+    node = "http://your_code_IP:5000"
     
-    print(f"=== Tarcoin CLI Wallet (Connected to Node: {node}) ===")
+    print("=== Tarcoin CLI Wallet ===")
     print("1. Generate New Wallet")
     print("2. Check Balance")
     print("3. Send Transaction")
