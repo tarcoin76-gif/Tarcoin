@@ -1,20 +1,23 @@
-# 🪙 Tarcoin (TRC)
+# Tarcoin Core & Wallet
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Network: ASIC Native](https://img.shields.io/badge/Network-ASIC%20Native-blue.svg)](https://github.com/tarcoin76-gif/Tarcoin)
-[![Supply: 17M TRC](https://img.shields.io/badge/Supply-17M%20TRC-green.svg)]()
-[![Quantum Resistant](https://img.shields.io/badge/Security-Quantum%20Resistant-purple.svg)](.)
+Tarcoin is a lightweight, quantum-resistant, and distributed blockchain designed to operate securely on mobile environments like Termux and resource-constrained systems. It combines post-quantum security measures, hash-based signatures, strict input sanitization, and P2P node synchronization.
 
-## ⛏️ About Tarcoin mining
+## System Architecture
 
-**Tarcoin (TRC)** is a third-generation blockchain cryptocurrency engineered with focus on:
+The project consists of two main components:
+1. **`tarcoin.py`**: The core blockchain node server, managing the ledger, Proof of Work mining, P2P consensus, and REST API endpoints.
+2. **`tarcoin_wallet.py`**: The interactive command-line wallet client used to generate quantum-safe keys, check balances, and submit transactions.
 
-- **Quantum-Resistant Security**: Protection against future quantum computing threats
-- **ASIC Native**: Optimized for genuine ASIC hardware without simulation or emulation
-- **Fixed Supply**: Permanent total supply of 17 million TRC (17,000,000 TRC)
-- **Energy Efficiency**: Optimal power consumption through ASIC-specific algorithms
-- **Decentralization**: Fully peer-to-peer decentralized network
+## Key Features
 
-## ✨ Key Features
+* **Quantum Resistance**: Employs SHA3-512 hashing and hash-based key derivation to mitigate threats from Shor’s and Grover’s algorithms.
+* **Distributed P2P Consensus**: Implements the longest-chain rule and peer discovery via Flask REST endpoints.
+* **Hardened Security**: Features regex input sanitization, nonce-based replay attack prevention, and strict payload type-checking.
+* **Persistent Storage**: Automatically saves and loads blockchain states using local JSON storage.
 
-### 1. **Anti-CPU Quantum-Safe**
+## Installation
+
+Ensure Python and pip are installed in your Termux or Linux environment, then install the required dependencies:
+
+```bash
+pip install flask requests ecdsa
