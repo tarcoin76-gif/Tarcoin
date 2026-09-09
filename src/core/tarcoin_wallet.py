@@ -78,7 +78,7 @@ def send_transaction(node_url: str, sender_pubkey: str, private_seed: str, recei
 
 
 if __name__ == '__main__':
-    node = "http://your_code_IP:5000"
+    node = "http://Your_Server_IP:5000"
     
     print("=== Tarcoin CLI Wallet ===")
     print("1. Generate New Wallet")
