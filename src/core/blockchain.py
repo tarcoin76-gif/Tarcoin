@@ -235,4 +235,23 @@ if __name__ == "__main__":
     
     print("Genesis Block successfully created!")
     print(f"Block 0 Hash: {tarcoin.get_chain_data()[0]['hash']}")
-    print(f"Blockchain Validity Status: {tarcoin.is_chain_valid()}")
+    
+    # Simulation of adding a transaction and mining a new block
+    print("\nCreating a test transaction...")
+    tx = Transaction(
+        tx_id="tx_001",
+        sender="GENESIS",
+        receiver="Alice",
+        amount=10.0,
+        timestamp=time.time(),
+        nonce=1
+    )
+    
+    tarcoin.pending_transactions.append(tx)
+    
+    print("Mining a new block...")
+    mined_block = tarcoin.mine_pending_transactions("Miner_Bob")
+    if mined_block:
+        print(f"New block successfully mined! Hash: {mined_block.hash}")
+        print(f"Alice's Balance: {tarcoin.get_balance('Alice')}")
+        print(f"Blockchain Validity Status: {tarcoin.is_chain_valid()}")
