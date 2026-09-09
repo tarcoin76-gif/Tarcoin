@@ -3,10 +3,11 @@ import hmac
 import secrets
 import time
 import requests
+import os
 import sys
 
 class QuantumResistantWallet:
-    """Client-side wallet utility for generating keys and signing Tarcoin transactions."""
+    """Client-side wallet utility for generating keys, signing transactions, and mining blocks."""
 
     @staticmethod
     def generate_wallet() -> dict:
@@ -28,7 +29,6 @@ class QuantumResistantWallet:
     def build_transaction(sender_pubkey: str, private_seed: str, receiver: str, amount: float, fee: float, nonce: int) -> dict:
         """Constructs and signs a transaction payload ready to be sent to the node."""
         timestamp = time.time()
-        # Calculate transaction hash matching the core logic
         tx_data = f"{sender_pubkey}{receiver}{amount}{fee}{timestamp}{nonce}"
         message = hashlib.sha3_512(tx_data.encode()).hexdigest()
         signature = QuantumResistantWallet.sign_message(private_seed, message)
@@ -44,13 +44,18 @@ class QuantumResistantWallet:
         }
 
 
+def get_node_url() -> str:
+    return os.getenv('TARCOIN_NODE_URL', 'http://127.0.0.1:5000')
+
+
 def check_balance(node_url: str, address: str):
     try:
-        response = requests.get(f"{node_url}/balance/{address}")
+        response = requests.get(f"{node_url}/balance/{address}", timeout=5)
         if response.status_code == 200:
             data = response.json()
-            print(f"Address: {data['address']}")
-            print(f"Balance: {data['balance']} TAR")
+            print(f"\n[Balance Checked Successfully]")
+            print(f"Address : {data['address']}")
+            print(f"Balance : {data['balance']} TAR")
         else:
             print(f"Error: {response.json().get('message')}")
     except requests.exceptions.RequestException as e:
@@ -58,7 +63,6 @@ def check_balance(node_url: str, address: str):
 
 
 def send_transaction(node_url: str, sender_pubkey: str, private_seed: str, receiver: str, amount: float, fee: float):
-    # Using a random 32-bit integer nonce for simplicity (ensure uniqueness per sender)
     nonce = secrets.randbits(32)
     
     tx_payload = QuantumResistantWallet.build_transaction(
@@ -71,21 +75,42 @@ def send_transaction(node_url: str, sender_pubkey: str, private_seed: str, recei
     )
 
     try:
-        response = requests.post(f"{node_url}/transactions/new", json=tx_payload)
-        print(response.json().get('message'))
+        response = requests.post(f"{node_url}/transactions/new", json=tx_payload, timeout=5)
+        print(f"\n[Transaction Status]: {response.json().get('message')}")
     except requests.exceptions.RequestException as e:
         print(f"Failed to submit transaction: {e}")
 
 
+def mine_block(node_url: str, miner_address: str):
+    if len(miner_address) != 128:
+        print("Error: Invalid miner address format (must be 128 hex characters).")
+        return
+
+    print(f"\n[Mining in progress...] Forging quantum-safe block for miner: {miner_address[:16]}...")
+    try:
+        response = requests.get(f"{node_url}/mine", params={'miner': miner_address}, timeout=30)
+        if response.status_code == 200:
+            data = response.json()
+            print(f"\n[Success]: {data['message']}")
+            print(f"Block Index  : {data['index']}")
+            print(f"Block Hash   : {data['hash']}")
+            print(f"Transactions : {len(data['transactions'])} included")
+        else:
+            print(f"\n[Mining Failed]: {response.json().get('message')}")
+    except requests.exceptions.RequestException as e:
+        print(f"Connection failed during mining: {e}")
+
+
 if __name__ == '__main__':
-    node = "http://Your_Server_IP:5000"
+    node = get_node_url()
     
-    print("=== Tarcoin CLI Wallet ===")
+    print(f"=== Tarcoin CLI Wallet & Miner (Connected to: {node}) ===")
     print("1. Generate New Wallet")
     print("2. Check Balance")
     print("3. Send Transaction")
+    print("4. Mine Block (Claim Mining Reward)")
     
-    choice = input("Select an option (1-3): ").strip()
+    choice = input("Select an option (1-4): ").strip()
     
     if choice == '1':
         wallet = QuantumResistantWallet.generate_wallet()
@@ -105,5 +130,10 @@ if __name__ == '__main__':
         tx_fee = float(input("Enter Fee: ").strip())
         
         send_transaction(node, sender_key, priv_seed, recv_key, amt, tx_fee)
+        
+    elif choice == '4':
+        miner_addr = input("Enter your Miner Public Key (Address to receive reward): ").strip()
+        mine_block(node, miner_addr)
+        
     else:
         print("Invalid option selected.")
