@@ -1,4 +1,4 @@
-# 🪙Tarcoin🪙 
+# 🪙Tarcoin Core🪙 
 
 Blockchain.0.2 Quantum resistant
 
@@ -12,3 +12,5 @@ System Architecture
 ​Enhanced Security: Features regex input sanitization, nonce-based replay attack tracking stored in database tables, and strict payload type-checking.
 ​Installation & Dependencies
 ​Ensure Python and pip are installed in your environment, then install the required dependencies:
+
+pip install flask flask-sqlalchemy requests
