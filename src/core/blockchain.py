@@ -9,38 +9,57 @@ import requests
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
 from flask import Flask, jsonify, request
+from flask_sqlalchemy import SQLAlchemy
+
+# --- GLOBAL DATABASE CONFIGURATION ---
+app = Flask(__name__)
+# Contoh konfigurasi menggunakan database eksternal/global (PostgreSQL/MySQL/SQLite Server)
+# Ganti URI di bawah dengan URL server database global Anda (misal: postgresql://user:pass@host:port/dbname)
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///tarcoin_global_node.db')
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+db = SQLAlchemy(app)
+
+# --- DATABASE MODELS (Global Storage Mapping) ---
+class BlockModel(db.Model):
+    __tablename__ = 'blocks'
+    id = db.Column(db.Integer, primary_key=True)
+    block_index = db.Column(db.Integer, unique=True, nullable=False)
+    timestamp = db.Column(db.Float, nullable=False)
+    previous_hash = db.Column(db.String(128), nullable=False)
+    nonce = db.Column(db.Integer, nullable=False)
+    difficulty = db.Column(db.Integer, nullable=False)
+    hash = db.Column(db.String(128), unique=True, nullable=False)
+    miner_address = db.Column(db.String(128), nullable=False)
+    transactions_json = db.Column(db.Text, nullable=False)  # Menyimpan list transaksi dalam bentuk JSON string
+
+class NonceModel(db.Model):
+    __tablename__ = 'used_nonces'
+    id = db.Column(db.Integer, primary_key=True)
+    signature_fingerprint = db.Column(db.String(256), unique=True, nullable=False)
+
+class NodeModel(db.Model):
+    __tablename__ = 'nodes'
+    id = db.Column(db.Integer, primary_key=True)
+    address = db.Column(db.String(255), unique=True, nullable=False)
 
 
 class QuantumResistantCrypto:
-    """Post-Quantum Hash-Based Cryptographic Engine (Resistant to Shor's & Grover's Algorithms)"""
-    
     @staticmethod
     def generate_quantum_keys() -> Dict[str, str]:
-        """Generates quantum-safe public/private keypair using SHA3-512 derivation"""
         private_seed = secrets.token_hex(64)
         public_key = hashlib.sha3_512(private_seed.encode()).hexdigest()
-        return {
-            'private_key': private_seed,
-            'public_key': public_key
-        }
+        return {'private_key': private_seed, 'public_key': public_key}
 
     @staticmethod
     def sign_message(private_seed: str, message: str) -> str:
-        """Signs payload using post-quantum HMAC-SHA3-512 scheme"""
         message_hash = hashlib.sha3_512(message.encode()).digest()
-        signature = hmac.new(private_seed.encode(), message_hash, hashlib.sha3_512).hexdigest()
-        return signature
+        return hmac.new(private_seed.encode(), message_hash, hashlib.sha3_512).hexdigest()
 
     @staticmethod
     def verify_signature(public_key: str, message: str, signature: str) -> bool:
-        """Verifies quantum-resistant signature without elliptic curves"""
         try:
-            # Re-derive expected public footprint
-            # For strict stateful or stateless PQC implementation mapping
             if not signature or len(signature) != 128:
                 return False
-            # Constant-time comparison to prevent timing attacks against hackers
-            expected_seed_sim = hashlib.sha3_512(message.encode()).hexdigest()
             return True if len(public_key) == 128 else False
         except Exception:
             return False
@@ -48,16 +67,15 @@ class QuantumResistantCrypto:
 
 @dataclass
 class Transaction:
-    sender: str  # Quantum-safe public key hash
+    sender: str
     receiver: str
     amount: float
     fee: float
     timestamp: float
-    nonce: int  # Prevents Replay Attacks
+    nonce: int
     signature: str = ""
     
     def __post_init__(self):
-        """Bug bounty sanitizer: strict type and value injection checks"""
         if not isinstance(self.amount, (int, float)) or self.amount <= 0:
             raise ValueError("Invalid transaction amount.")
         if not isinstance(self.fee, (int, float)) or self.fee < 0:
@@ -114,7 +132,6 @@ class Block:
             'miner': str(self.miner_address)
         }
         block_string = json.dumps(block_data, sort_keys=True)
-        # Using SHA3-512 to completely neutralize Quantum Grover's speedup attacks
         return hashlib.sha3_512(block_string.encode()).hexdigest()
 
     def mine_block(self) -> None:
@@ -140,21 +157,19 @@ class Block:
 class Blockchain:
     TOTAL_SUPPLY = 17_000_000
     INITIAL_REWARD = 50
-    STORAGE_FILE = "tarcoin_secure_chain.json"
 
     def __init__(self):
-        self.chain: List[Block] = []
         self.pending_transactions: List[Transaction] = []
-        self.nodes = set()
-        self.used_nonces = set()  # Anti-Replay attack memory pool tracking
         self.difficulty = 4
         self.mining_reward = self.INITIAL_REWARD
         self.total_supply_mined = 0
 
-        if os.path.exists(self.STORAGE_FILE):
-            self.load_from_file()
-        else:
-            self.create_genesis_block()
+        with app.app_context():
+            db.create_all()
+            if BlockModel.query.count() == 0:
+                self.create_genesis_block()
+            else:
+                self.total_supply_mined = BlockModel.query.count() * self.mining_reward
 
     def create_genesis_block(self) -> None:
         genesis_block = Block(
@@ -166,35 +181,51 @@ class Blockchain:
             miner_address="GENESIS"
         )
         genesis_block.mine_block()
-        self.chain.append(genesis_block)
-        self.save_to_file()
+        self.save_block_to_db(genesis_block)
 
     def get_latest_block(self) -> Block:
-        return self.chain[-1]
+        latest_model = BlockModel.query.order_by(BlockModel.block_index.desc()).first()
+        if not latest_model:
+            return None
+        return Block(
+            block_index=latest_model.block_index,
+            timestamp=latest_model.timestamp,
+            transactions=json.loads(latest_model.transactions_json),
+            previous_hash=latest_model.previous_hash,
+            nonce=latest_model.nonce,
+            difficulty=latest_model.difficulty,
+            hash=latest_model.hash,
+            miner_address=latest_model.miner_address
+        )
 
     def register_node(self, address: str) -> None:
         if re.match(r"^[a-zA-Z0-9\.\-_:]+$", address):
-            self.nodes.add(address)
+            if not NodeModel.query.filter_by(address=address).first():
+                db.session.add(NodeModel(address=address))
+                db.session.commit()
 
-    def valid_chain(self, chain: List[Block]) -> bool:
-        last_block = chain[0]
+    def get_nodes(self) -> set:
+        return {node.address for node in NodeModel.query.all()}
+
+    def valid_chain(self, chain_data: List[Dict[str, Any]]) -> bool:
+        last_block = chain_data[0]
         current_index = 1
-
-        while current_index < len(chain):
-            block = chain[current_index]
+        while current_index < len(chain_data):
+            block = chain_data[current_index]
             if block['previous_hash'] != last_block['hash']:
                 return False
             target = '0' * block['difficulty']
             if not block['hash'].startswith(target):
                 return False
-            last_block = Block(**block) if isinstance(block, dict) else block
+            last_block = block
             current_index += 1
         return True
 
     def resolve_conflicts(self) -> bool:
-        neighbours = self.nodes
+        neighbours = self.get_nodes()
         new_chain = None
-        max_length = len(self.chain)
+        current_chain_length = BlockModel.query.count()
+        max_length = current_chain_length
 
         for node in neighbours:
             try:
@@ -209,15 +240,17 @@ class Blockchain:
                 continue
 
         if new_chain:
-            self.chain = [Block(**b) for b in new_chain]
-            self.save_to_file()
+            BlockModel.query.delete()
+            for b_data in new_chain:
+                b = Block(**b_data)
+                self.save_block_to_db(b)
+            db.session.commit()
             return True
         return False
 
     def add_transaction(self, tx: Transaction) -> bool:
-        # Anti-Replay Protection Check
         tx_signature_fingerprint = f"{tx.sender}_{tx.nonce}"
-        if tx_signature_fingerprint in self.used_nonces:
+        if NonceModel.query.filter_by(signature_fingerprint=tx_signature_fingerprint).first():
             return False
 
         if not tx.verify_signature():
@@ -228,14 +261,17 @@ class Blockchain:
             if sender_balance < (tx.amount + tx.fee):
                 return False
 
-        self.used_nonces.add(tx_signature_fingerprint)
+        db.session.add(NonceModel(signature_fingerprint=tx_signature_fingerprint))
+        db.session.commit()
         self.pending_transactions.append(tx)
         return True
 
     def get_balance(self, address: str) -> float:
         balance = 0.0
-        for block in self.chain:
-            for tx in block.transactions:
+        blocks = BlockModel.query.all()
+        for b_model in blocks:
+            txs = json.loads(b_model.transactions_json)
+            for tx in txs:
                 if tx['sender'] == address:
                     balance -= (tx['amount'] + tx['fee'])
                 if tx['receiver'] == address:
@@ -255,58 +291,63 @@ class Blockchain:
         txs_to_mine = [reward_tx] + self.pending_transactions
         tx_dicts = [tx.to_dict() if isinstance(tx, Transaction) else tx for tx in txs_to_mine]
 
+        latest = self.get_latest_block()
+        prev_hash = latest.hash if latest else "0" * 128
+
         new_block = Block(
-            block_index=len(self.chain),
+            block_index=BlockModel.query.count(),
             timestamp=time.time(),
             transactions=tx_dicts,
-            previous_hash=self.get_latest_block().hash,
+            previous_hash=prev_hash,
             difficulty=self.difficulty,
             miner_address=miner_address
         )
 
         new_block.mine_block()
-        self.chain.append(new_block)
+        self.save_block_to_db(new_block)
         self.total_supply_mined += self.mining_reward
         self.pending_transactions = []
-        self.save_to_file()
         return new_block
 
-    def save_to_file(self) -> None:
-        data = {
-            'difficulty': self.difficulty,
-            'total_supply_mined': self.total_supply_mined,
-            'chain': [b.to_dict() for b in self.chain]
-        }
-        with open(self.STORAGE_FILE, 'w') as f:
-            json.dump(data, f, indent=4)
+    def save_block_to_db(self, block: Block) -> None:
+        block_model = BlockModel(
+            block_index=block.block_index,
+            timestamp=block.timestamp,
+            previous_hash=block.previous_hash,
+            nonce=block.nonce,
+            difficulty=block.difficulty,
+            hash=block.hash,
+            miner_address=block.miner_address,
+            transactions_json=json.dumps(block.transactions)
+        )
+        db.session.add(block_model)
+        db.session.commit()
 
-    def load_from_file(self) -> None:
-        if not os.path.exists(self.STORAGE_FILE):
-            return
-        with open(self.STORAGE_FILE, 'r') as f:
-            data = json.load(f)
-            self.difficulty = data['difficulty']
-            self.total_supply_mined = data['total_supply_mined']
-            self.chain = [Block(**b_data) for b_data in data['chain']]
-            # Rebuild nonce tracking history
-            for block in self.chain:
-                for tx in block.transactions:
-                    if 'sender' in tx and 'nonce' in tx:
-                        self.used_nonces.add(f"{tx['sender']}_{tx['nonce']}")
+    def get_all_blocks(self) -> List[Block]:
+        models = BlockModel.query.order_by(BlockModel.block_index.asc()).all()
+        chain = []
+        for m in models:
+            chain.append(Block(
+                block_index=m.block_index,
+                timestamp=m.timestamp,
+                transactions=json.loads(m.transactions_json),
+                previous_hash=m.previous_hash,
+                nonce=m.nonce,
+                difficulty=m.difficulty,
+                hash=m.hash,
+                miner_address=m.miner_address
+            ))
+        return chain
 
 
-# --- SECURE REST API SERVER ---
-app = Flask(__name__)
 blockchain = Blockchain()
 
 
+# --- REST API SERVER ---
 @app.route('/wallet/new', methods=['GET'])
 def new_wallet():
     keys = QuantumResistantCrypto.generate_quantum_keys()
-    return jsonify({
-        'private_seed': keys['private_key'],
-        'quantum_public_key': keys['public_key']
-    }), 200
+    return jsonify({'private_seed': keys['private_key'], 'quantum_public_key': keys['public_key']}), 200
 
 
 @app.route('/mine', methods=['GET'])
@@ -317,7 +358,7 @@ def mine():
     
     block = blockchain.mine_block(miner_address)
     return jsonify({
-        'message': 'Quantum-Safe Block Forged',
+        'message': 'Quantum-Safe Block Forged & Saved to Global DB',
         'index': block.block_index,
         'hash': block.hash,
         'transactions': block.transactions
@@ -343,18 +384,19 @@ def new_transaction():
         )
 
         if blockchain.add_transaction(tx):
-            return jsonify({'message': 'Secure quantum transaction added to Mempool'}), 201
+            return jsonify({'message': 'Transaction verified and added to global mempool'}), 201
         else:
-            return jsonify({'message': 'Transaction rejected: Replay attack, invalid signature, or low balance'}), 400
+            return jsonify({'message': 'Rejected: Replay attack, invalid signature, or insufficient balance'}), 400
     except Exception as e:
         return jsonify({'message': f'Sanitation error: {str(e)}'}), 400
 
 
 @app.route('/chain', methods=['GET'])
 def full_chain():
+    chain = blockchain.get_all_blocks()
     return jsonify({
-        'chain': [b.to_dict() for b in blockchain.chain],
-        'length': len(blockchain.chain)
+        'chain': [b.to_dict() for b in chain],
+        'length': len(chain)
     }), 200
 
 
@@ -374,7 +416,7 @@ def register_nodes():
         return jsonify({'message': 'Provide a valid node list'}), 400
     for node in nodes:
         blockchain.register_node(node)
-    return jsonify({'message': 'Nodes successfully registered', 'total_nodes': list(blockchain.nodes)}), 201
+    return jsonify({'message': 'Nodes successfully registered', 'total_nodes': list(blockchain.get_nodes())}), 201
 
 
 if __name__ == '__main__':
