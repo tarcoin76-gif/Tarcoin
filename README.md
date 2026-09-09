@@ -19,3 +19,8 @@ Ensure Python and pip are installed in your environment, then install the requir
 
 ```bash
 pip install flask flask-sqlalchemy requests
+
+Before running wallet.py, set the environment variable to point to your global node server (such as a cloud VPS, Heroku, or AWS server):
+
+export TARCOIN_NODE_URL="http://your-server-ip:5000"
+python wallet.py
