@@ -3,9 +3,6 @@
 # 🪙 Tarcoin Core 🪙
 ### **Blockchain 2.0 Quantum Resistant**
 
-<p align="center">
-   width="300px" style="border-radius: 15px;">
-</p>
 
 [![Python](https://img.shields.io/badge/Python-3.8%2B-blue.svg)](https://www.python.org/)
 [![Flask](https://img.shields.io/badge/Flask-Framework-lightgrey.svg)](https://flask.palletsprojects.com/)
