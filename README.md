@@ -1,4 +1,4 @@
-# [ 🪙 Tarcoin Core & Global Database Node 🌏 ]
+# [🪙Tarcoin Core & Global Database Node🌏]
 
 Tarcoin is a lightweight, quantum-resistant, and distributed blockchain designed to operate securely with an external global database architecture (via `Flask-SQLAlchemy`). It combines post-quantum security measures, hash-based signatures, strict input sanitization, and P2P node synchronization backed by global database storage.
 
