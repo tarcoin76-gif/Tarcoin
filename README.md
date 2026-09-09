@@ -1,10 +1,10 @@
-
+<div align="center">
 
 # 🪙 Tarcoin Core 🪙
 ### **Blockchain 2.0 Quantum Resistant**
 
 <p align="center">
-  <img src="1000064686_2.jpg" alt="Tarcoin Logo" width="300px" style="border-radius: 15px;">
+   width="300px" style="border-radius: 15px;">
 </p>
 
 [![Python](https://img.shields.io/badge/Python-3.8%2B-blue.svg)](https://www.python.org/)
