@@ -1,7 +1,3 @@
-Tarcoin Core Blockchain Implementation
-Quantum-resistant ASIC-native cryptocurrency
-"""
-
 import hashlib
 import time
 from typing import List, Dict, Any, Optional
@@ -97,7 +93,6 @@ class Block:
 class Blockchain:
     """Main Blockchain implementation for Tarcoin"""
     
-    # Fixed supply constants
     TOTAL_SUPPLY = 17_000_000  # 17 million TRC
     INITIAL_REWARD = 50  # Initial block reward
     HALVING_INTERVAL = 210_000  # Blocks between halvings
@@ -140,15 +135,13 @@ class Blockchain:
     
     def validate_transaction(self, transaction: Transaction) -> bool:
         """Validate a transaction"""
-        # Check if sender has sufficient balance
         sender_balance = self.get_balance(transaction.sender)
         
         if sender_balance < (transaction.amount + transaction.fee):
             return False
         
-        # Check if transaction is not too old
         current_time = time.time()
-        if current_time - transaction.timestamp > 3600:  # 1 hour
+        if current_time - transaction.timestamp > 3600:
             return False
         
         return True
@@ -167,17 +160,11 @@ class Blockchain:
             miner_address=miner_address
         )
         
-        # Mine the block
         new_block.mine_block()
-        
-        # Add block to chain
         self.chain.append(new_block)
         
-        # Update supply and reward
         self.total_supply_mined += self.mining_reward
         self.pending_transactions = []
-        
-        # Adjust difficulty based on block time
         self.adjust_difficulty()
         
         return new_block
@@ -187,7 +174,6 @@ class Blockchain:
         if len(self.chain) < 2:
             return
         
-        # Check every 2016 blocks (Bitcoin's adjustment interval)
         if len(self.chain) % 2016 == 0:
             time_taken = (
                 self.chain[-1].timestamp - 
@@ -205,7 +191,6 @@ class Blockchain:
         halvings = len(self.chain) // self.HALVING_INTERVAL
         self.mining_reward = self.INITIAL_REWARD / (2 ** halvings)
         
-        # Stop mining if total supply reached
         if self.total_supply_mined >= self.TOTAL_SUPPLY:
             self.mining_reward = 0
     
@@ -228,15 +213,12 @@ class Blockchain:
             current_block = self.chain[i]
             previous_block = self.chain[i - 1]
             
-            # Verify current block hash
             if current_block.hash != current_block.calculate_block_hash():
                 return False
             
-            # Verify link to previous block
             if current_block.previous_hash != previous_block.hash:
                 return False
             
-            # Verify proof of work
             if not current_block.hash.startswith('0' * current_block.difficulty):
                 return False
         
@@ -245,3 +227,12 @@ class Blockchain:
     def get_chain_data(self) -> List[Dict[str, Any]]:
         """Get all blocks in the chain as dictionaries"""
         return [block.to_dict() for block in self.chain]
+
+
+if __name__ == "__main__":
+    print("Starting Tarcoin Blockchain...")
+    tarcoin = Blockchain()
+    
+    print("Genesis Block successfully created!")
+    print(f"Block 0 Hash: {tarcoin.get_chain_data()[0]['hash']}")
+    print(f"Blockchain Validity Status: {tarcoin.is_chain_valid()}")
