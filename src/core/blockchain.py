@@ -13,8 +13,8 @@ from flask_sqlalchemy import SQLAlchemy
 
 # --- GLOBAL DATABASE CONFIGURATION ---
 app = Flask(__name__)
-# Contoh konfigurasi menggunakan database eksternal/global (PostgreSQL/MySQL/SQLite Server)
-# Ganti URI di bawah dengan URL server database global Anda (misal: postgresql://user:pass@host:port/dbname)
+# Example configuration using an external/global database (PostgreSQL/MySQL/SQLite Server)
+# Replace the URI below with your global database server URL (e.g., postgresql://user:pass@host:port/dbname)
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///tarcoin_global_node.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
@@ -30,7 +30,7 @@ class BlockModel(db.Model):
     difficulty = db.Column(db.Integer, nullable=False)
     hash = db.Column(db.String(128), unique=True, nullable=False)
     miner_address = db.Column(db.String(128), nullable=False)
-    transactions_json = db.Column(db.Text, nullable=False)  # Menyimpan list transaksi dalam bentuk JSON string
+    transactions_json = db.Column(db.Text, nullable=False)  # Stores the list of transactions as a JSON string
 
 class NonceModel(db.Model):
     __tablename__ = 'used_nonces'
@@ -388,7 +388,7 @@ def new_transaction():
         else:
             return jsonify({'message': 'Rejected: Replay attack, invalid signature, or insufficient balance'}), 400
     except Exception as e:
-        return jsonify({'message': f'Sanitation error: {str(e)}'}), 400
+        return jsonify({'message': f'Sanitization error: {str(e)}'}), 400
 
 
 @app.route('/chain', methods=['GET'])
