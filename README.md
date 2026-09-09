@@ -17,7 +17,7 @@ The project relies on a centralized or distributed relational database backend (
 
 Ensure Python and pip are installed in your environment, then install the required dependencies:
 
-```bash
+``bash
 pip install flask flask-sqlalchemy requests
 
 Before running wallet.py, set the environment variable to point to your global node server (such as a cloud VPS, Heroku, or AWS server):
