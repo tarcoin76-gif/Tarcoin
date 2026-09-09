@@ -53,7 +53,7 @@ def check_balance(node_url: str, address: str):
         response = requests.get(f"{node_url}/balance/{address}", timeout=5)
         if response.status_code == 200:
             data = response.json()
-            print(f"\n[Balance Checked Successfully]")
+            print(f"\n[Balance Synced Successfully]")
             print(f"Address : {data['address']}")
             print(f"Balance : {data['balance']} TAR")
         else:
