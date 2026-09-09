@@ -1,4 +1,3 @@
-"""
 Tarcoin Core Blockchain Implementation
 Quantum-resistant ASIC-native cryptocurrency
 """
