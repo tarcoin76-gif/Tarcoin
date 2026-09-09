@@ -1,4 +1,4 @@
-<div align="center">
+
 
 # 🪙 Tarcoin Core 🪙
 ### **Blockchain 2.0 Quantum Resistant**
