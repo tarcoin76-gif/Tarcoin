@@ -6,20 +6,20 @@ import re
 import hmac
 import secrets
 import requests
+import threading
+import socket
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, current_app
 from flask_sqlalchemy import SQLAlchemy
 
 # --- GLOBAL DATABASE CONFIGURATION ---
 app = Flask(__name__)
-# Example configuration using an external/global database (PostgreSQL/MySQL/SQLite Server)
-# Replace the URI below with your global database server URL (e.g., postgresql://user:pass@host:port/dbname)
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///tarcoin_global_node.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
-# --- DATABASE MODELS (Global Storage Mapping) ---
+# --- DATABASE MODELS ---
 class BlockModel(db.Model):
     __tablename__ = 'blocks'
     id = db.Column(db.Integer, primary_key=True)
@@ -30,7 +30,7 @@ class BlockModel(db.Model):
     difficulty = db.Column(db.Integer, nullable=False)
     hash = db.Column(db.String(128), unique=True, nullable=False)
     miner_address = db.Column(db.String(128), nullable=False)
-    transactions_json = db.Column(db.Text, nullable=False)  # Stores the list of transactions as a JSON string
+    transactions_json = db.Column(db.Text, nullable=False)
 
 class NonceModel(db.Model):
     __tablename__ = 'used_nonces'
@@ -43,24 +43,82 @@ class NodeModel(db.Model):
     address = db.Column(db.String(255), unique=True, nullable=False)
 
 
+# --- REAL POST-QUANTUM CRYPTOGRAPHY (Hash-Based Lamport Signature Scheme) ---
 class QuantumResistantCrypto:
+    KEY_PAIRS_COUNT = 256  # 256 bits for SHA3-256 equivalent security layer inside SHA3-512
+
     @staticmethod
     def generate_quantum_keys() -> Dict[str, str]:
-        private_seed = secrets.token_hex(64)
-        public_key = hashlib.sha3_512(private_seed.encode()).hexdigest()
-        return {'private_key': private_seed, 'public_key': public_key}
+        # Generates a deterministic hash-based post-quantum key pair (Lamport-derived)
+        master_seed = secrets.token_hex(64)
+        private_keys = []
+        public_keys = []
+        
+        for i in range(QuantumResistantCrypto.KEY_PAIRS_COUNT):
+            # Derive private key components securely from master seed
+            priv_0 = hashlib.sha3_512(f"{master_seed}_0_{i}".encode()).hexdigest()
+            priv_1 = hashlib.sha3_512(f"{master_seed}_1_{i}".encode()).hexdigest()
+            private_keys.append((priv_0, priv_1))
+            
+            # Corresponding public keys are the hashes of the private keys
+            pub_0 = hashlib.sha3_512(priv_0.encode()).hexdigest()
+            pub_1 = hashlib.sha3_512(priv_1.encode()).hexdigest()
+            public_keys.append((pub_0, pub_1))
+
+        # Store public key as a single unified hex string (or JSON string representation)
+        pub_key_serialized = json.dumps(public_keys)
+        public_key_hash = hashlib.sha3_512(pub_key_serialized.encode()).hexdigest()
+        
+        return {
+            'private_key': master_seed,
+            'public_key': public_key_hash,
+            'raw_public_keys': public_key_serialized # Kept for signature validation mapping
+        }
 
     @staticmethod
-    def sign_message(private_seed: str, message: str) -> str:
-        message_hash = hashlib.sha3_512(message.encode()).digest()
-        return hmac.new(private_seed.encode(), message_hash, hashlib.sha3_512).hexdigest()
+    def sign_message(master_seed: str, message: str) -> str:
+        msg_hash = hashlib.sha3_256(message.encode()).hexdigest()
+        binary_msg = ''.join(format(int(c, 16), '04b') for c in msg_hash)[:256]
+        
+        signature_parts = []
+        for i, bit in enumerate(binary_msg):
+            priv_0 = hashlib.sha3_512(f"{master_seed}_0_{i}".encode()).hexdigest()
+            priv_1 = hashlib.sha3_512(f"{master_seed}_1_{i}".encode()).hexdigest()
+            
+            if bit == '0':
+                signature_parts.append(priv_0)
+            else:
+                signature_parts.append(priv_1)
+                
+        return json.dumps(signature_parts)
 
     @staticmethod
-    def verify_signature(public_key: str, message: str, signature: str) -> bool:
+    def verify_signature(public_key_hash: str, message: str, signature: str, raw_public_keys_json: str) -> bool:
         try:
-            if not signature or len(signature) != 128:
+            if not signature or not raw_public_keys_json:
                 return False
-            return True if len(public_key) == 128 else False
+            
+            public_keys = json.loads(raw_public_keys_json)
+            signature_parts = json.loads(signature)
+            
+            if len(public_keys) != 256 or len(signature_parts) != 256:
+                return False
+
+            # Verify public key integrity against address hash
+            calculated_pub_hash = hashlib.sha3_512(raw_public_keys_json.encode()).hexdigest()
+            if calculated_pub_hash != public_key_hash:
+                return False
+
+            msg_hash = hashlib.sha3_256(message.encode()).hexdigest()
+            binary_msg = ''.join(format(int(c, 16), '04b') for c in msg_hash)[:256]
+
+            for i, bit in enumerate(binary_msg):
+                sig_part = signature_parts[i]
+                expected_pub = public_keys[i][0] if bit == '0' else public_keys[i][1]
+                derived_pub = hashlib.sha3_512(sig_part.encode()).hexdigest()
+                if derived_pub != expected_pub:
+                    return False
+            return True
         except Exception:
             return False
 
@@ -74,6 +132,7 @@ class Transaction:
     timestamp: float
     nonce: int
     signature: str = ""
+    raw_public_keys: str = ""
     
     def __post_init__(self):
         if not isinstance(self.amount, (int, float)) or self.amount <= 0:
@@ -82,8 +141,6 @@ class Transaction:
             raise ValueError("Invalid transaction fee.")
         if not re.match(r"^[a-fA-F0-9]{128}$", self.sender) and self.sender not in ["GENESIS", "MINING_REWARD"]:
             raise ValueError("Malformed sender address format.")
-        if not re.match(r"^[a-fA-F0-9]{128}$", self.receiver) and self.receiver != "GENESIS":
-            raise ValueError("Malformed receiver address format.")
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -93,7 +150,8 @@ class Transaction:
             'fee': float(self.fee),
             'timestamp': float(self.timestamp),
             'nonce': int(self.nonce),
-            'signature': str(self.signature)
+            'signature': str(self.signature),
+            'raw_public_keys': str(self.raw_public_keys)
         }
     
     def calculate_hash(self) -> str:
@@ -108,7 +166,7 @@ class Transaction:
         if self.sender in ["GENESIS", "MINING_REWARD"]:
             return True
         message = self.calculate_hash()
-        return QuantumResistantCrypto.verify_signature(self.sender, message, self.signature)
+        return QuantumResistantCrypto.verify_signature(self.sender, message, self.signature, self.raw_public_keys)
 
 
 @dataclass
@@ -154,15 +212,87 @@ class Block:
         }
 
 
+class MainnetP2PManager:
+    def __init__(self, blockchain_instance, host='0.0.0.0', p2p_port=6000):
+        self.blockchain = blockchain_instance
+        self.host = host
+        self.p2p_port = p2p_port
+        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+    def start_p2p_server(self):
+        try:
+            self.server_socket.bind((self.host, self.p2p_port))
+            self.server_socket.listen(15)
+            threading.Thread(target=self._listen_incoming_connections, daemon=True).start()
+        except Exception:
+            pass
+
+    def _listen_incoming_connections(self):
+        while True:
+            try:
+                client_sock, addr = self.server_socket.accept()
+                threading.Thread(target=self._handle_peer_connection, args=(client_sock,), daemon=True).start()
+            except Exception:
+                break
+
+    def _handle_peer_connection(self, client_sock):
+        try:
+            data = client_sock.recv(16384)
+            if data:
+                message = json.loads(data.decode('utf-8'))
+                msg_type = message.get('type')
+                payload = message.get('payload')
+
+                if msg_type == 'BROADCAST_BLOCK':
+                    self._process_incoming_block(payload)
+                elif msg_type == 'BROADCAST_TRANSACTION':
+                    self._process_incoming_transaction(payload)
+            client_sock.close()
+        except Exception:
+            pass
+
+    def _process_incoming_block(self, block_data):
+        with app.app_context():
+            latest = self.blockchain.get_latest_block()
+            if latest and block_data['index'] == latest.block_index + 1:
+                if block_data['previous_hash'] == latest.hash:
+                    new_b = Block(**block_data)
+                    target = '0' * new_b.difficulty
+                    if new_b.hash.startswith(target):
+                        self.blockchain.save_block_to_db(new_b)
+
+    def _process_incoming_transaction(self, tx_data):
+        with app.app_context():
+            tx = Transaction(**tx_data)
+            self.blockchain.add_transaction(tx)
+
+    def broadcast(self, msg_type: str, payload: dict):
+        nodes = self.blockchain.get_nodes()
+        message = json.dumps({'type': msg_type, 'payload': payload})
+        for node in nodes:
+            try:
+                host_ip, port_str = node.split(':')
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(2)
+                s.connect((host_ip, int(port_str)))
+                s.sendall(message.encode('utf-8'))
+                s.close()
+            except Exception:
+                continue
+
+
 class Blockchain:
     TOTAL_SUPPLY = 17_000_000
     INITIAL_REWARD = 50
 
-    def __init__(self):
+    def __init__(self, p2p_port=6000):
         self.pending_transactions: List[Transaction] = []
         self.difficulty = 4
         self.mining_reward = self.INITIAL_REWARD
         self.total_supply_mined = 0
+        self.p2p_manager = MainnetP2PManager(self, p2p_port=p2p_port)
+        self.p2p_manager.start_p2p_server()
 
         with app.app_context():
             db.create_all()
@@ -207,47 +337,6 @@ class Blockchain:
     def get_nodes(self) -> set:
         return {node.address for node in NodeModel.query.all()}
 
-    def valid_chain(self, chain_data: List[Dict[str, Any]]) -> bool:
-        last_block = chain_data[0]
-        current_index = 1
-        while current_index < len(chain_data):
-            block = chain_data[current_index]
-            if block['previous_hash'] != last_block['hash']:
-                return False
-            target = '0' * block['difficulty']
-            if not block['hash'].startswith(target):
-                return False
-            last_block = block
-            current_index += 1
-        return True
-
-    def resolve_conflicts(self) -> bool:
-        neighbours = self.get_nodes()
-        new_chain = None
-        current_chain_length = BlockModel.query.count()
-        max_length = current_chain_length
-
-        for node in neighbours:
-            try:
-                response = requests.get(f'http://{node}/chain', timeout=3)
-                if response.status_code == 200:
-                    length = response.json()['length']
-                    chain = response.json()['chain']
-                    if length > max_length and self.valid_chain(chain):
-                        max_length = length
-                        new_chain = chain
-            except requests.exceptions.RequestException:
-                continue
-
-        if new_chain:
-            BlockModel.query.delete()
-            for b_data in new_chain:
-                b = Block(**b_data)
-                self.save_block_to_db(b)
-            db.session.commit()
-            return True
-        return False
-
     def add_transaction(self, tx: Transaction) -> bool:
         tx_signature_fingerprint = f"{tx.sender}_{tx.nonce}"
         if NonceModel.query.filter_by(signature_fingerprint=tx_signature_fingerprint).first():
@@ -264,6 +353,7 @@ class Blockchain:
         db.session.add(NonceModel(signature_fingerprint=tx_signature_fingerprint))
         db.session.commit()
         self.pending_transactions.append(tx)
+        self.p2p_manager.broadcast('BROADCAST_TRANSACTION', tx.to_dict())
         return True
 
     def get_balance(self, address: str) -> float:
@@ -307,6 +397,7 @@ class Blockchain:
         self.save_block_to_db(new_block)
         self.total_supply_mined += self.mining_reward
         self.pending_transactions = []
+        self.p2p_manager.broadcast('BROADCAST_BLOCK', new_block.to_dict())
         return new_block
 
     def save_block_to_db(self, block: Block) -> None:
@@ -340,14 +431,15 @@ class Blockchain:
         return chain
 
 
-blockchain = Blockchain()
-
-
 # --- REST API SERVER ---
 @app.route('/wallet/new', methods=['GET'])
 def new_wallet():
     keys = QuantumResistantCrypto.generate_quantum_keys()
-    return jsonify({'private_seed': keys['private_key'], 'quantum_public_key': keys['public_key']}), 200
+    return jsonify({
+        'private_seed': keys['private_key'],
+        'quantum_public_key': keys['public_key'],
+        'raw_public_keys': keys['raw_public_keys']
+    }), 200
 
 
 @app.route('/mine', methods=['GET'])
@@ -358,7 +450,7 @@ def mine():
     
     block = blockchain.mine_block(miner_address)
     return jsonify({
-        'message': 'Quantum-Safe Block Forged & Saved to Global DB',
+        'message': 'Post-Quantum Safe Block Forged & Broadcasted',
         'index': block.block_index,
         'hash': block.hash,
         'transactions': block.transactions
@@ -369,9 +461,9 @@ def mine():
 def new_transaction():
     try:
         values = request.get_json()
-        required = ['sender', 'receiver', 'amount', 'fee', 'timestamp', 'nonce', 'signature']
+        required = ['sender', 'receiver', 'amount', 'fee', 'timestamp', 'nonce', 'signature', 'raw_public_keys']
         if not all(k in values for k in required):
-            return jsonify({'message': 'Missing payload values'}), 400
+            return jsonify({'message': 'Missing payload values including post-quantum parameters'}), 400
 
         tx = Transaction(
             sender=values['sender'],
@@ -380,13 +472,14 @@ def new_transaction():
             fee=float(values['fee']),
             timestamp=float(values['timestamp']),
             nonce=int(values['nonce']),
-            signature=str(values['signature'])
+            signature=str(values['signature']),
+            raw_public_keys=str(values['raw_public_keys'])
         )
 
         if blockchain.add_transaction(tx):
-            return jsonify({'message': 'Transaction verified and added to global mempool'}), 201
+            return jsonify({'message': 'Quantum-safe transaction verified and broadcasted'}), 201
         else:
-            return jsonify({'message': 'Rejected: Replay attack, invalid signature, or insufficient balance'}), 400
+            return jsonify({'message': 'Rejected: Invalid post-quantum signature or balance'}), 400
     except Exception as e:
         return jsonify({'message': f'Sanitization error: {str(e)}'}), 400
 
@@ -422,4 +515,6 @@ def register_nodes():
 if __name__ == '__main__':
     import sys
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 5000
+    p2p_port = port + 1000
+    blockchain = Blockchain(p2p_port=p2p_port)
     app.run(host='0.0.0.0', port=port)
