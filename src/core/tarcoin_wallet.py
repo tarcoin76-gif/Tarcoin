@@ -23,7 +23,20 @@ def load_keys():
         print("[-] Wallet file (wallet_keys.json) not found. Please create a new wallet first using the 'create' command.")
         sys.exit(1)
     with open(WALLET_FILE, "r") as f:
-        return json.load(f)
+        keys = json.load(f)
+        # Fallback pengaman jika file wallet lama belum memiliki key_index
+        if 'key_index' not in keys:
+            keys['key_index'] = 0
+        return keys
+
+def update_wallet_index(new_index: int):
+    """Memperbarui index kunci yang sudah terpakai di file wallet lokal."""
+    if WALLET_FILE.exists():
+        with open(WALLET_FILE, "r") as f:
+            keys = json.load(f)
+        keys['key_index'] = new_index
+        with open(WALLET_FILE, "w") as f:
+            json.dump(keys, f, indent=4)
 
 def cmd_create(args):
     node_url = get_node_url()
@@ -48,8 +61,9 @@ def cmd_balance(args):
         if response.status_code == 200:
             data = response.json()
             print(f"\n=== WALLET INFORMATION ===")
-            print(f"Address : {data['address']}")
-            print(f"Balance : {data['balance']} TAR")
+            print(f"Address   : {data['address']}")
+            print(f"Balance   : {data['balance']} TAR")
+            print(f"Key Index : {keys.get('key_index', 0)} (Stateful Lamport)")
         else:
             print(f"[-] Failed to retrieve balance: {response.text}")
     except requests.exceptions.ConnectionError:
@@ -62,13 +76,14 @@ def cmd_send(args):
     import hashlib
     import secrets
 
-    def sign_message(master_seed: str, message: str) -> str:
+    def sign_message_with_index(master_seed: str, message: str, key_index: int) -> str:
         msg_hash = hashlib.sha3_256(message.encode()).hexdigest()
         binary_msg = ''.join(format(int(c, 16), '04b') for c in msg_hash)[:256]
         signature_parts = []
         for i, bit in enumerate(binary_msg):
-            priv_0 = hashlib.sha3_512(f"{master_seed}_0_{i}".encode()).hexdigest()
-            priv_1 = hashlib.sha3_512(f"{master_seed}_1_{i}".encode()).hexdigest()
+            # Menggunakan key_index agar kunci privat berbeda di tiap transaksi (Anti Key-Reuse)
+            priv_0 = hashlib.sha3_512(f"{master_seed}_{key_index}_0_{i}".encode()).hexdigest()
+            priv_1 = hashlib.sha3_512(f"{master_seed}_{key_index}_1_{i}".encode()).hexdigest()
             signature_parts.append(priv_0 if bit == '0' else priv_1)
         return json.dumps(signature_parts)
 
@@ -78,15 +93,17 @@ def cmd_send(args):
     fee = float(args.fee)
     timestamp = time.time()
     nonce = secrets.randbits(32)
+    current_key_index = keys.get('key_index', 0)
 
     if len(receiver) != 128:
         print("[-] Error: Invalid receiver address format (must be a 128-character hash).")
         return
 
-    tx_data_str = f"{sender}{receiver}{amount}{fee}{timestamp}{nonce}"
+    # Hash transaksi disesuaikan dengan backend yang menyertakan key_index
+    tx_data_str = f"{sender}{receiver}{amount}{fee}{timestamp}{nonce}{current_key_index}"
     tx_hash = hashlib.sha3_512(tx_data_str.encode()).hexdigest()
     
-    signature = sign_message(keys['private_seed'], tx_hash)
+    signature = sign_message_with_index(keys['private_seed'], tx_hash, current_key_index)
     raw_public_keys = keys['raw_public_keys']
 
     payload = {
@@ -97,14 +114,17 @@ def cmd_send(args):
         "timestamp": timestamp,
         "nonce": nonce,
         "signature": signature,
-        "raw_public_keys": raw_public_keys
+        "raw_public_keys": raw_public_keys,
+        "key_index": current_key_index
     }
 
     try:
-        print("[*] Broadcasting post-quantum secure transaction to the network...")
+        print(f"[*] Broadcasting transaction using Key Index #{current_key_index}...")
         response = requests.post(f"{node_url}/transactions/new", json=payload)
         if response.status_code == 201:
             print("[+] Transaction successfully verified and broadcasted!")
+            # Geser index kunci lokal secara otomatis untuk transaksi berikutnya agar aman
+            update_wallet_index(current_key_index + 1)
             print(json.dumps(response.json(), indent=2))
         else:
             print(f"[-] Transaction rejected: {response.json().get('message', response.text)}")
