@@ -1,42 +1,27 @@
-<div align="center">
+# Tarcoin Post-Quantum Blockchain & CLI Wallet
 
-# 🪙 Tarcoin Core 🪙
-### **Blockchain 2.0 Quantum Resistant**
-
-
-[![Python](https://img.shields.io/badge/Python-3.8%2B-blue.svg)](https://www.python.org/)
-[![Flask](https://img.shields.io/badge/Flask-Framework-lightgrey.svg)](https://flask.palletsprojects.com/)
-[![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-ORM-red.svg)](https://www.sqlalchemy.org/)
-[![Quantum Resistant](https://img.shields.io/badge/Security-Quantum%20Resistant-success.svg)](https://github.com/)
-
-</div>
+Tarcoin is an experimental blockchain implementation integrating a **Lamport Signature Scheme**-based Post-Quantum Cryptography protocol (utilizing SHA3-512 and SHA3-256 hash functions). This system is designed to secure transactions against future quantum computing decryption threats.
 
 ---
 
-## 📖 About Project
+## Key Features
 
-**Tarcoin** is a lightweight, quantum-resistant, and distributed blockchain designed to operate securely with an external global database architecture (via Flask-SQLAlchemy). It combines post-quantum security measures, hash-based signatures, and strict input validation.
-
----
-
-## 🏗️ System Architecture
-
-The project relies on a centralized or distributed relational database backend (such as PostgreSQL, MySQL, or server-hosted SQLite) mapped via SQLAlchemy to persistently and concurrently manage blocks, nonces, and network nodes.
+* **Post-Quantum Lamport Signatures**: Utilizes hash-based signature schemes (256 key pairs per signature) for high-level quantum resistance.
+* **Global Database (SQLite & SQLAlchemy)**: Persistently stores block history, address balances, transactions, and network nodes.
+* **P2P Socket Manager**: Automated synchronization across network nodes via peer-to-peer TCP socket communication.
+* **Flexible CLI Wallet**: Command-line wallet utility for key management, balance checking, fund transfers, token swaps, and local or background daemon mining control.
 
 ---
 
-## ✨ Key Features
+## Project File Structure
 
-- 🛡️ **Quantum Resistance**: Employs SHA3-512 hashing and post-quantum HMAC-SHA3-512 derivations to mitigate threats from Shor’s and Grover’s algorithms.
-- 🗄️ **Global Database Storage**: Replaces fragile local JSON file storage with robust SQL-backed database mapping (`flask-sqlalchemy`) to support multi-node scalability and data integrity.
-- 🌐 **Distributed P2P Consensus**: Implements the longest-chain rule and peer discovery via Flask REST endpoints.
-- 🔒 **Enhanced Security**: Features regex input sanitization, nonce-based replay attack tracking stored in database tables, and strict payload type-checking.
+* `tarcoin.py`: Core blockchain node code, Flask REST API, PoW consensus logic, and P2P server manager.
+* `wallet.py`: Wallet command-line interface (CLI) to interact with the Tarcoin node.
 
 ---
 
-## 📦 Installation & Dependencies
+## Installation & Running the Node (`tarcoin.py`)
 
-Ensure Python and `pip` are installed in your environment, then run the following command to install the required dependencies:
-
-```bash
-pip install flask flask-sqlalchemy requests
+1. Ensure the required Python libraries are installed:
+   ```bash
+   pip install flask flask_sqlalchemy requests
