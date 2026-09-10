@@ -49,30 +49,26 @@ class QuantumResistantCrypto:
 
     @staticmethod
     def generate_quantum_keys() -> Dict[str, str]:
-        # Generates a deterministic hash-based post-quantum key pair (Lamport-derived)
         master_seed = secrets.token_hex(64)
         private_keys = []
         public_keys = []
         
         for i in range(QuantumResistantCrypto.KEY_PAIRS_COUNT):
-            # Derive private key components securely from master seed
             priv_0 = hashlib.sha3_512(f"{master_seed}_0_{i}".encode()).hexdigest()
             priv_1 = hashlib.sha3_512(f"{master_seed}_1_{i}".encode()).hexdigest()
             private_keys.append((priv_0, priv_1))
             
-            # Corresponding public keys are the hashes of the private keys
             pub_0 = hashlib.sha3_512(priv_0.encode()).hexdigest()
             pub_1 = hashlib.sha3_512(priv_1.encode()).hexdigest()
             public_keys.append((pub_0, pub_1))
 
-        # Store public key as a single unified hex string (or JSON string representation)
         pub_key_serialized = json.dumps(public_keys)
         public_key_hash = hashlib.sha3_512(pub_key_serialized.encode()).hexdigest()
         
         return {
             'private_key': master_seed,
             'public_key': public_key_hash,
-            'raw_public_keys': public_key_serialized # Kept for signature validation mapping
+            'raw_public_keys': pub_key_serialized
         }
 
     @staticmethod
@@ -104,7 +100,6 @@ class QuantumResistantCrypto:
             if len(public_keys) != 256 or len(signature_parts) != 256:
                 return False
 
-            # Verify public key integrity against address hash
             calculated_pub_hash = hashlib.sha3_512(raw_public_keys_json.encode()).hexdigest()
             if calculated_pub_hash != public_key_hash:
                 return False
@@ -431,6 +426,10 @@ class Blockchain:
         return chain
 
 
+# Inisialisasi instance blockchain secara global di luar main scope
+blockchain = Blockchain(p2p_port=6000)
+
+
 # --- REST API SERVER ---
 @app.route('/wallet/new', methods=['GET'])
 def new_wallet():
@@ -516,5 +515,5 @@ if __name__ == '__main__':
     import sys
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 5000
     p2p_port = port + 1000
-    blockchain = Blockchain(p2p_port=p2p_port)
-    app.run(host='0.0.0.0', port=port)
+    blockchain.p2p_manager.p2p_port = p2p_port
+    app.run(host='0.0.0.0', port=port, debug=True)
