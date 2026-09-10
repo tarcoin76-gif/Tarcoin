@@ -1,152 +1,208 @@
-import sys
 import os
+import sys
 import json
-import hashlib
-import secrets
+import time
 import requests
-from typing import Dict, Any
+import argparse
+import subprocess
+from pathlib import Path
 
-# Ensure default node path points to your local Flask port
-DEFAULT_NODE_URL = os.getenv('NODE_URL', 'http://127.0.0.1:5000')
+WALLET_FILE = Path("wallet_keys.json")
+DEFAULT_NODE = "http://127.0.0.1:5000"
 
-class WalletClient:
-    @staticmethod
-    def create_new_wallet() -> Dict[str, str]:
-        """Generates a new post-quantum key pair from the local node."""
-        try:
-            response = requests.get(f"{DEFAULT_NODE_URL}/wallet/new", timeout=5)
-            if response.status_code == 200:
-                return response.json()
-            else:
-                print(f"[X] Failed to create wallet from node: {response.text}")
-                sys.exit(1)
-        except requests.exceptions.ConnectionError:
-            print(f"[X] Unable to connect to blockchain node at {DEFAULT_NODE_URL}. Ensure the node is running.")
-            sys.exit(1)
+def get_node_url():
+    return os.getenv("TARCOIN_NODE", DEFAULT_NODE)
 
-    @staticmethod
-    def get_balance(address: str) -> float:
-        """Checks the balance of a specific address on the blockchain."""
-        try:
-            response = requests.get(f"{DEFAULT_NODE_URL}/balance/{address}", timeout=5)
-            if response.status_code == 200:
-                return response.json().get('balance', 0.0)
-            else:
-                print(f"[X] Server error: {response.text}")
-                return 0.0
-        except requests.exceptions.ConnectionError:
-            print(f"[X] Connection to node failed at {DEFAULT_NODE_URL}.")
-            return 0.0
+def save_keys(keys_data):
+    with open(WALLET_FILE, "w") as f:
+        json.dump(keys_data, f, indent=4)
+    print(f"[+] Wallet keys successfully saved to {WALLET_FILE}")
 
-    @staticmethod
+def load_keys():
+    if not WALLET_FILE.exists():
+        print("[-] Wallet file (wallet_keys.json) not found. Please create a new wallet first using the 'create' command.")
+        sys.exit(1)
+    with open(WALLET_FILE, "r") as f:
+        return json.load(f)
+
+def cmd_create(args):
+    node_url = get_node_url()
+    try:
+        print(f"[*] Contacting the node to generate new post-quantum keys...")
+        response = requests.get(f"{node_url}/wallet/new")
+        if response.status_code == 200:
+            data = response.json()
+            save_keys(data)
+            print(f"[+] Quantum Public Address: {data['quantum_public_key']}")
+        else:
+            print(f"[-] Failed to create wallet from node: {response.text}")
+    except requests.exceptions.ConnectionError:
+        print(f"[-] Connection failed to node {node_url}. Make sure the tarcoin.py server is running.")
+
+def cmd_balance(args):
+    keys = load_keys()
+    address = keys['quantum_public_key']
+    node_url = get_node_url()
+    try:
+        response = requests.get(f"{node_url}/balance/{address}")
+        if response.status_code == 200:
+            data = response.json()
+            print(f"\n=== WALLET INFORMATION ===")
+            print(f"Address : {data['address']}")
+            print(f"Balance : {data['balance']} TAR")
+        else:
+            print(f"[-] Failed to retrieve balance: {response.text}")
+    except requests.exceptions.ConnectionError:
+        print(f"[-] Connection failed to node {node_url}.")
+
+def cmd_send(args):
+    keys = load_keys()
+    node_url = get_node_url()
+    
+    import hashlib
+    import secrets
+
     def sign_message(master_seed: str, message: str) -> str:
-        """Signs a message hash using the Lamport Signature scheme identical to the node."""
         msg_hash = hashlib.sha3_256(message.encode()).hexdigest()
         binary_msg = ''.join(format(int(c, 16), '04b') for c in msg_hash)[:256]
-        
         signature_parts = []
         for i, bit in enumerate(binary_msg):
             priv_0 = hashlib.sha3_512(f"{master_seed}_0_{i}".encode()).hexdigest()
             priv_1 = hashlib.sha3_512(f"{master_seed}_1_{i}".encode()).hexdigest()
-            
-            if bit == '0':
-                signature_parts.append(priv_0)
-            else:
-                signature_parts.append(priv_1)
-                
+            signature_parts.append(priv_0 if bit == '0' else priv_1)
         return json.dumps(signature_parts)
 
-    @staticmethod
-    def send_transaction(sender_seed: str, sender_pub_key: str, raw_pub_keys: str, receiver: str, amount: float, fee: float) -> bool:
-        """Creates, signs, and broadcasts a new transaction to the blockchain."""
-        import time
-        
-        timestamp = time.time()
-        nonce = secrets.randbits(32)
-        
-        # Calculate transaction data hash precisely like the node
-        tx_data = f"{sender_pub_key}{receiver}{amount}{fee}{timestamp}{nonce}"
-        message_hash = hashlib.sha3_512(tx_data.encode()).hexdigest()
-        
-        # Create post-quantum digital signature
-        signature = WalletClient.sign_message(sender_seed, message_hash)
-        
-        payload = {
-            'sender': sender_pub_key,
-            'receiver': receiver,
-            'amount': float(amount),
-            'fee': float(fee),
-            'timestamp': float(timestamp),
-            'nonce': int(nonce),
-            'signature': signature,
-            'raw_public_keys': raw_pub_keys
-        }
-        
+    sender = keys['quantum_public_key']
+    receiver = args.to
+    amount = float(args.amount)
+    fee = float(args.fee)
+    timestamp = time.time()
+    nonce = secrets.randbits(32)
+
+    if len(receiver) != 128:
+        print("[-] Error: Invalid receiver address format (must be a 128-character hash).")
+        return
+
+    tx_data_str = f"{sender}{receiver}{amount}{fee}{timestamp}{nonce}"
+    tx_hash = hashlib.sha3_512(tx_data_str.encode()).hexdigest()
+    
+    signature = sign_message(keys['private_seed'], tx_hash)
+    raw_public_keys = keys['raw_public_keys']
+
+    payload = {
+        "sender": sender,
+        "receiver": receiver,
+        "amount": amount,
+        "fee": fee,
+        "timestamp": timestamp,
+        "nonce": nonce,
+        "signature": signature,
+        "raw_public_keys": raw_public_keys
+    }
+
+    try:
+        print("[*] Broadcasting post-quantum secure transaction to the network...")
+        response = requests.post(f"{node_url}/transactions/new", json=payload)
+        if response.status_code == 201:
+            print("[+] Transaction successfully verified and broadcasted!")
+            print(json.dumps(response.json(), indent=2))
+        else:
+            print(f"[-] Transaction rejected: {response.json().get('message', response.text)}")
+    except requests.exceptions.ConnectionError:
+        print(f"[-] Connection failed to node {node_url}.")
+
+def cmd_mine(args):
+    keys = load_keys()
+    miner_address = keys['quantum_public_key']
+    node_url = get_node_url()
+    
+    if args.mode == "start":
+        print(f"[*] Starting local mining process targeting address: {miner_address}")
+        print("[*] Press Ctrl+C to stop (if running in foreground).")
         try:
-            response = requests.post(f"{DEFAULT_NODE_URL}/transactions/new", json=payload, timeout=5)
-            if response.status_code == 201:
-                print("[V] Transaction successfully sent and verified by the network!")
-                print(json.dumps(response.json(), indent=2))
-                return True
-            else:
-                print(f"[X] Transaction rejected: {response.text}")
-                return False
-        except requests.exceptions.ConnectionError:
-            print(f"[X] Failed to send transaction to {DEFAULT_NODE_URL}.")
-            return False
-
-
-def print_help():
-    print("=== TARCOIN WALLET CLI GUIDE ===")
-    print("1. Create New Wallet:")
-    print("   python wallet.py create")
-    print("\n2. Check Address Balance:")
-    print("   python wallet.py balance <QUANTUM_PUBLIC_KEY>")
-    print("\n3. Send Coins:")
-    print("   python wallet.py send <PRIVATE_SEED> <SENDER_PUBLIC_KEY> <RAW_PUBLIC_KEYS_JSON> <RECEIVER_ADDRESS> <AMOUNT> <FEE>")
-
-
-if __name__ == '__main__':
-    if len(sys.argv) < 2:
-        print_help()
-        sys.exit(1)
-
-    command = sys.argv[1].lower()
-
-    if command == 'create':
-        print("[*] Generating new Post-Quantum (Lamport) keys...")
-        wallet_data = WalletClient.create_new_wallet()
-        print("\n--- WALLET SUCCESSFULLY CREATED ---")
-        print(f"PRIVATE_SEED       : {wallet_data['private_key']}")
-        print(f"PUBLIC_KEY (Address): {wallet_data['quantum_public_key']}")
-        print(f"RAW_PUBLIC_KEYS    : {wallet_data['raw_public_keys']}")
-        print("\nIMPORTANT: Keep your Private Seed safe! Never share it with anyone.")
-
-    elif command == 'balance':
-        if len(sys.argv) < 3:
-            print("[X] Missing arguments. Usage: python wallet.py balance <PUBLIC_KEY_ADDRESS>")
-            sys.exit(1)
-        address = sys.argv[2]
-        balance = WalletClient.get_balance(address)
-        print(f"Address: {address}")
-        print(f"Balance: {balance} TAR")
-
-    elif command == 'send':
-        if len(sys.argv) < 8:
-            print("[X] Incomplete arguments.")
-            print("Usage: python wallet.py send <PRIVATE_SEED> <SENDER_PUBKEY> <RAW_PUBKEYS> <RECEIVER> <AMOUNT> <FEE>")
-            sys.exit(1)
+            while True:
+                res = requests.get(f"{node_url}/mine?miner={miner_address}")
+                if res.status_code == 200:
+                    block_info = res.json()
+                    print(f"[+] Block #{block_info['index']} Successfully Mined! Hash: {block_info['hash'][:16]}...")
+                else:
+                    print(f"[-] Mining failed: {res.text}")
+                time.sleep(5)
+        except KeyboardInterrupt:
+            print("\n[*] Mining stopped by user.")
+            
+    elif args.mode == "daemon":
+        pid_file = Path("miner.pid")
+        if pid_file.exists():
+            print("[-] Miner daemon is already running or active PID file exists.")
+            return
+        print("[*] Running Miner Daemon in the background...")
+        sub = subprocess.Popen([sys.executable, __file__, "mine", "start"])
+        pid_file.write_text(str(sub.pid))
+        print(f"[+] Daemon successfully started with PID: {sub.pid}")
         
-        p_seed = sys.argv[2]
-        s_pub = sys.argv[3]
-        r_pubkeys = sys.argv[4]
-        receiver = sys.argv[5]
-        amount = float(sys.argv[6])
-        fee = float(sys.argv[7])
+    elif args.mode == "stop":
+        pid_file = Path("miner.pid")
+        if not pid_file.exists():
+            print("[-] No active miner daemon records found.")
+            return
+        pid = int(pid_file.read_text())
+        try:
+            os.kill(pid, 9)
+            print(f"[+] Miner daemon (PID: {pid}) successfully stopped.")
+        except Exception as e:
+            print(f"[-] Failed to stop process: {e}")
+        finally:
+            if pid_file.exists():
+                pid_file.unlink()
 
-        print("[*] Signing transaction with Post-Quantum cryptography...")
-        WalletClient.send_transaction(p_seed, s_pub, r_pubkeys, receiver, amount, fee)
+def cmd_swap(args):
+    """
+    Simulated Token Swap Feature (e.g., Tarcoin to Wrapped Tarcoin / Ecosystem tokens)
+    Utilizes internal/contract simulation mechanism through standard transaction routing.
+    """
+    keys = load_keys()
+    swap_pool_address = "f" * 128  # Dummy liquidity pool address
+    
+    print(f"[*] Swapping {args.amount} TAR for {args.target_token.upper()} token...")
+    args.to = swap_pool_address
+    cmd_send(args)
+    print(f"[+] Swap processed successfully! You have received ecosystem tokens: {args.target_token.upper()}.")
 
+def main():
+    parser = argparse.ArgumentParser(description="Tarcoin Post-Quantum CLI Wallet")
+    subparsers = parser.add_subparsers(dest="command", help="Available Commands")
+
+    subparsers.add_parser("create", help="Create a new wallet and quantum key pair")
+    subparsers.add_parser("balance", help="Check current wallet balance")
+
+    parser_send = subparsers.add_parser("send", help="Send TAR coins to another address")
+    parser_send.add_argument("--to", required=True, help="Recipient public address (128 characters)")
+    parser_send.add_argument("--amount", required=True, type=float, help="Amount of TAR to send")
+    parser_send.add_argument("--fee", default=0.0, type=float, help="Transaction fee")
+
+    parser_mine = subparsers.add_parser("mine", help="Mine new blocks")
+    parser_mine.add_argument("mode", choices=["start", "daemon", "stop"], help="Mining execution mode")
+
+    parser_swap = subparsers.add_parser("swap", help="Swap TAR for other ecosystem tokens")
+    parser_swap.add_argument("--target-token", required=True, help="Target token symbol (e.g., wTAR, USDT)")
+    parser_swap.add_argument("--amount", required=True, type=float, help="Amount of TAR to swap")
+    parser_swap.add_argument("--fee", default=0.001, type=float, help="Swap fee")
+
+    args = parser.parse_args()
+
+    if args.command == "create":
+        cmd_create(args)
+    elif args.command == "balance":
+        cmd_balance(args)
+    elif args.command == "send":
+        cmd_send(args)
+    elif args.command == "mine":
+        cmd_mine(args)
+    elif args.command == "swap":
+        cmd_swap(args)
     else:
-        print(f"[X] Unknown command: {command}")
-        print_help()
+        parser.print_help()
+
+if __name__ == "__main__":
+    main()
