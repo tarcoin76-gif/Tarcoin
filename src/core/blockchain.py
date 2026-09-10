@@ -43,20 +43,20 @@ class NodeModel(db.Model):
     address = db.Column(db.String(255), unique=True, nullable=False)
 
 
-# --- REAL POST-QUANTUM CRYPTOGRAPHY (Hash-Based Lamport Signature Scheme) ---
+# --- SECURE STATEFUL POST-QUANTUM CRYPTOGRAPHY (Lamport with Index Offset) ---
 class QuantumResistantCrypto:
     KEY_PAIRS_COUNT = 256  # 256 bits for SHA3-256 equivalent security layer inside SHA3-512
 
     @staticmethod
-    def generate_quantum_keys() -> Dict[str, str]:
+    def generate_quantum_keys() -> Dict[str, Any]:
         master_seed = secrets.token_hex(64)
-        private_keys = []
+        # Menggunakan index 0 untuk pembuatan kunci publik awal dompet
+        initial_index = 0
         public_keys = []
         
         for i in range(QuantumResistantCrypto.KEY_PAIRS_COUNT):
-            priv_0 = hashlib.sha3_512(f"{master_seed}_0_{i}".encode()).hexdigest()
-            priv_1 = hashlib.sha3_512(f"{master_seed}_1_{i}".encode()).hexdigest()
-            private_keys.append((priv_0, priv_1))
+            priv_0 = hashlib.sha3_512(f"{master_seed}_{initial_index}_0_{i}".encode()).hexdigest()
+            priv_1 = hashlib.sha3_512(f"{master_seed}_{initial_index}_1_{i}".encode()).hexdigest()
             
             pub_0 = hashlib.sha3_512(priv_0.encode()).hexdigest()
             pub_1 = hashlib.sha3_512(priv_1.encode()).hexdigest()
@@ -68,18 +68,20 @@ class QuantumResistantCrypto:
         return {
             'private_key': master_seed,
             'public_key': public_key_hash,
-            'raw_public_keys': pub_key_serialized
+            'raw_public_keys': pub_key_serialized,
+            'key_index': initial_index
         }
 
     @staticmethod
-    def sign_message(master_seed: str, message: str) -> str:
+    def sign_message(master_seed: str, message: str, key_index: int = 0) -> str:
         msg_hash = hashlib.sha3_256(message.encode()).hexdigest()
         binary_msg = ''.join(format(int(c, 16), '04b') for c in msg_hash)[:256]
         
         signature_parts = []
         for i, bit in enumerate(binary_msg):
-            priv_0 = hashlib.sha3_512(f"{master_seed}_0_{i}".encode()).hexdigest()
-            priv_1 = hashlib.sha3_512(f"{master_seed}_1_{i}".encode()).hexdigest()
+            # Kunci privat diturunkan menggunakan key_index yang unik per transaksi (mencegah kebocoran key reuse)
+            priv_0 = hashlib.sha3_512(f"{master_seed}_{key_index}_0_{i}".encode()).hexdigest()
+            priv_1 = hashlib.sha3_512(f"{master_seed}_{key_index}_1_{i}".encode()).hexdigest()
             
             if bit == '0':
                 signature_parts.append(priv_0)
@@ -128,6 +130,7 @@ class Transaction:
     nonce: int
     signature: str = ""
     raw_public_keys: str = ""
+    key_index: int = 0  # Ditambahkan untuk melacak index kunci Lamport yang aktif
     
     def __post_init__(self):
         if not isinstance(self.amount, (int, float)) or self.amount <= 0:
@@ -146,16 +149,17 @@ class Transaction:
             'timestamp': float(self.timestamp),
             'nonce': int(self.nonce),
             'signature': str(self.signature),
-            'raw_public_keys': str(self.raw_public_keys)
+            'raw_public_keys': str(self.raw_public_keys),
+            'key_index': int(self.key_index)
         }
     
     def calculate_hash(self) -> str:
-        tx_data = f"{self.sender}{self.receiver}{self.amount}{self.fee}{self.timestamp}{self.nonce}"
+        tx_data = f"{self.sender}{self.receiver}{self.amount}{self.fee}{self.timestamp}{self.nonce}{self.key_index}"
         return hashlib.sha3_512(tx_data.encode()).hexdigest()
 
     def sign_transaction(self, private_seed: str) -> None:
         message = self.calculate_hash()
-        self.signature = QuantumResistantCrypto.sign_message(private_seed, message)
+        self.signature = QuantumResistantCrypto.sign_message(private_seed, message, self.key_index)
 
     def verify_signature(self) -> bool:
         if self.sender in ["GENESIS", "MINING_REWARD"]:
@@ -333,7 +337,8 @@ class Blockchain:
         return {node.address for node in NodeModel.query.all()}
 
     def add_transaction(self, tx: Transaction) -> bool:
-        tx_signature_fingerprint = f"{tx.sender}_{tx.nonce}"
+        # Mengunci agar kombinasi sender dan key_index tidak pernah dipakai dua kali (Key Reuse Prevention)
+        tx_signature_fingerprint = f"{tx.sender}_{tx.key_index}"
         if NonceModel.query.filter_by(signature_fingerprint=tx_signature_fingerprint).first():
             return False
 
@@ -370,7 +375,8 @@ class Blockchain:
             amount=self.mining_reward,
             fee=0.0,
             timestamp=time.time(),
-            nonce=secrets.randbits(32)
+            nonce=secrets.randbits(32),
+            key_index=0
         )
         
         txs_to_mine = [reward_tx] + self.pending_transactions
@@ -437,7 +443,8 @@ def new_wallet():
     return jsonify({
         'private_seed': keys['private_key'],
         'quantum_public_key': keys['public_key'],
-        'raw_public_keys': keys['raw_public_keys']
+        'raw_public_keys': keys['raw_public_keys'],
+        'key_index': keys['key_index']
     }), 200
 
 
@@ -472,13 +479,14 @@ def new_transaction():
             timestamp=float(values['timestamp']),
             nonce=int(values['nonce']),
             signature=str(values['signature']),
-            raw_public_keys=str(values['raw_public_keys'])
+            raw_public_keys=str(values['raw_public_keys']),
+            key_index=int(values.get('key_index', 0))
         )
 
         if blockchain.add_transaction(tx):
             return jsonify({'message': 'Quantum-safe transaction verified and broadcasted'}), 201
         else:
-            return jsonify({'message': 'Rejected: Invalid post-quantum signature or balance'}), 400
+            return jsonify({'message': 'Rejected: Invalid post-quantum signature, key reuse, or balance'}), 400
     except Exception as e:
         return jsonify({'message': f'Sanitization error: {str(e)}'}), 400
 
