@@ -1,4 +1,4 @@
-# 🪙 Tarcoin Post-Quantum Blockchain 🪙 & CLI Wallet
+# 🪙 Tarcoin 🪙 Post-Quantum Blockchain & CLI Wallet
 
 Tarcoin is an experimental blockchain implementation integrating a **Lamport Signature Scheme**-based Post-Quantum Cryptography protocol (utilizing SHA3-512 and SHA3-256 hash functions). This system is designed to secure transactions against future quantum computing decryption threats.
 
